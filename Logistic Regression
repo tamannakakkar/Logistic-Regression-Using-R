@@ -1,0 +1,375 @@
+# Logistic Regresstion for Bank 
+
+# 1. Installing & loading the required Packages as told by Sir + Additionally required ones 
+
+install.packages("gmodels")
+install.packages("Hmisc")
+install.packages("pROC")
+install.packages("ResourceSelection")
+install.packages("car")
+install.packages("caret")
+install.packages("dplyr")
+install.packages("InformationValue")
+install.packages(VIF)
+install.packages("plotmo")
+install.packages("plotrix")
+install.packages("TeachingDemos")
+library(gmodels)
+library(Hmisc)
+library(pROC)
+library(ResourceSelection)
+library(car)
+library(caret)
+library(dplyr)
+library(InformationValue)
+library(VIF)
+library(VIFCP)
+library(earth)
+library(plotmo)
+library(plotrix)
+library(TeachingDemos)
+library(caret)
+library(lattice)
+library(tibble)
+library(ggplot2)
+
+
+# 2. Finding the working directory and setting it to the one where files are located
+
+getwd()
+setwd("C:/Users/toshaan boss/Desktop/Term IV/AMMA/Assignment/Bank_for_Class")
+
+# 3. Read Client Data Set from bank.client.csv and store it in a Data Frame, also check the structure of the data set for basic check 
+
+df.client <- read.csv('bank_client.csv')
+str(df.client)
+
+# 4. Read other attributes from respective csv file into a dataframe, and see structure 
+
+df.attr <- read.csv('bank_other_attributes.csv')
+str(df.attr)
+
+# 5. Read Campaign Data and see structure 
+df.campaign <- read.csv('latest_campaign.csv')
+str(df.campaign)
+
+# 6. Read Campaign Outcome and see structure 
+df.campOutcome <- read.csv('campaign_outcome.csv')
+str(df.campOutcome)
+
+
+# 7. Create campaign data by using merge function
+# This is  done by using temporary tables, and merging two tables ar a time. Merging uses primary key concepy which is specified in the merge function itself 
+#Later on, we don't want duplicates so data is checked for duplicacy, and the logic that number of rows need to be equal to the number of unique customer IDs, which was the merging basis 
+
+df.temp1 <- merge(df.client, df.campaign, by = 'Cust_id', all.x = TRUE)
+df.temp2 <- merge(df.temp1, df.attr, by = 'Cust_id', all.x = TRUE)
+df.data <- merge(df.temp2, df.campOutcome, by = 'Cust_id', all.x = TRUE)
+length(unique(df.data$Cust_id)) == nrow(df.data) 
+
+# Output for above command is TRUE, that means equal no of rows as the no of customer-ids
+
+# 8. Clear temporary tables created for convenience 
+
+rm(df.temp1,df.temp2)
+
+# 9. Since we have crated a new table, we need to do a preliminary check by checking first/ last parts of the new object
+
+head(df.data)
+
+# 10. Checking the table structure for better clarity in tabular form
+View(df.data) 
+
+
+#11. Table Structure 
+str(df.data)
+
+# 12. Consolidated Table Summary 
+summary(df.data)
+
+# 13. Check the Response Rate - for Yes in the given data 
+CrossTable(df.data$y)
+
+# Reponse Rate is 0.117 overall
+
+# 14. Because we have this limited dtaa, split it into a TRAINING set to build the model, and a TEST set to check it
+# 70 percent of data becomes the Training set, and 30 percent becomes the Test set
+set.seed(1234) # for reproducibility
+df.data$rand <- runif(nrow(df.data))
+df.train <- df.data[df.data$rand <= 0.7,]
+df.test <- df.data[df.data$rand > 0.7,]
+nrow(df.train)
+nrow(df.test)
+
+# 15. See how the categorical variables are distributed and are related with target outcome
+# This gives that within the categorial variables, for exmaple job, what different sets have respnded in the final outcome 
+CrossTable(df.train$job, df.train$y)
+CrossTable(df.train$marital, df.train$y)
+CrossTable(df.train$education, df.train$y)
+CrossTable(df.train$default, df.train$y)
+CrossTable(df.train$housing, df.train$y)
+CrossTable(df.train$loan, df.train$y)
+CrossTable(df.train$poutcome, df.train$y)
+
+# 16.See how numerical variables are distributed - Hist gives a basic histogram distribution about the data
+
+hist(df.train$age)
+hist(df.train$balance)
+hist(df.train$duration)
+hist(df.train$campaign)
+hist(df.train$pdays)
+hist(df.train$previous)
+describe(df.train[c("age", "balance", "duration", "campaign", "pdays", "previous")])
+
+# 17. Running a Full Model
+# Out of the Train Data set, the rows who are a "YES" in the final outcome would be put into yact of Train data set
+# In the train dataset a Generalised Linear Model is created using the differnt categorical and numerical variables, and is put in full.model
+
+df.train$yact = ifelse(df.train$y == 'yes',1,0)
+full.model <- glm(formula = yact ~ age + balance + duration + campaign + pdays + previous +
+                    job + marital + education + default + housing + loan + poutcome, 
+                  data=df.train, family = binomial)
+summary(full.model)
+
+# 18. Check for Variance Inflation Factor which is a reflection of multicollinarity 
+
+fit <- lm(formula <- yact ~ age + balance + duration + campaign + pdays + previous +
+            job + marital + education + default + housing + loan + poutcome, 
+          data=df.train)
+vif(fit)
+
+# 19. Automated variable selection - Backward
+backward <- step(full.model, direction = 'backward')
+summary(backward)
+
+# 20. Training probabilities and roc
+df.train$prob = predict(full.model, type=c("response"))
+class(df.train)
+nrow(df.train)
+q <- roc(y ~ prob, data = df.train)
+plot(q)
+auc(q)
+# In output, Area under the curve: 0.8811
+
+# 21. Variable importance
+varImp(full.model, scale = FALSE)
+
+# 22. Perform HL Test
+hl <- hoslem.test(df.train$y, df.train$prob, g=10)
+hl # we should not be able to reject null hypothesis - not a required test always
+
+# 23. confusion matrix on training set
+df.train$ypred = ifelse(df.train$prob>=.5,'pred_yes','pred_no')
+table(df.train$ypred,df.train$y)
+
+
+
+# 24. probabilities on test set
+df.test$prob = predict(full.model, newdata = df.test, type=c("response"))
+
+# 25. #confusion matrix on test set
+df.test$ypred = ifelse(df.test$prob>=.5,'pred_yes','pred_no')
+table(df.test$ypred,df.test$y)
+
+# 26. KS Plot 
+ks_plot(actuals=df.train$y, predictedScores=df.train$ypred)
+
+# 27. Creating another data set with binary values for the outcome variable: 1 for yes, 0 for no
+df.data_new <- df.data
+df.data_new$yact = ifelse(df.data$y == 'yes',1,0) 
+nrow(df.data_new)
+
+# 28. We need to treat this data for further use. We would be removing rows with NA entries
+df.data_new <- df.data_new[!apply(df.data_new[,c("age", "balance", "duration", "campaign", "pdays", "previous", "job","marital", "education", "default", "housing", "loan", "poutcome")], 1, anyNA),]
+nrow(df.data_new)
+View(df.data_new)
+
+set.seed(1234) # for reproducibility
+df.data_new$rand <- runif(nrow(df.data_new))
+
+# 29. Splitting the sample again into Training (70%) & Test set (70%)
+df.train_kmodel <- df.data_new[df.data_new$rand <= 0.7,]
+df.test_kmodel <- df.data_new[df.data_new$rand > 0.3,]
+nrow(df.train_kmodel)
+
+# 30. Building a tentative model with all variables including insignificant ones
+result_tentative_trainkmodel <- glm(formula = yact ~ age + balance + duration + campaign + pdays + previous +
+                                      job + marital + education + default + housing + loan + poutcome, 
+                                    data=df.train_kmodel, family = binomial)
+
+summary(result_tentative_trainkmodel)
+
+## Remove Insignificant Variables Based on P Values 
+
+# 31. a. Remove pdays
+
+df.train_kmodel_onlysig<- df.train_kmodel
+df.train_kmodel_onlysig$pdays <-NULL
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + default + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+
+
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. b. Removing Marital Status Single - Refer to new Summary 
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$marital!="single",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + default + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$marital!="single",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. c. Removing Default Types
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$marital!="yes",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$marital!="yes",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. d. Remobing Job Unemployed
+
+# removing insignificant variables - 10) removing job 'unemployed'
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$job!="unemployed",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$job!="unemployed",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. e. Removing job unknown
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$job!="unknown",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$job!="unknown",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. f. Removing job management 
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$job!="management",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$job!="management",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. g. Removing poutcome other 
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$poutcome!="other",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$poutcome!="other",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. h. Removing eductaion unknown 
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$education!="unknown",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$education!="unknown",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 31. i. Removing job student 
+
+df.train_kmodel_onlysig <- df.train_kmodel_onlysig[df.train_kmodel_onlysig$job!="student",]
+result_tentative_trainkmodel_sig1 <- glm(formula = yact ~ age + balance + duration + campaign + previous +
+                                           job + marital + education + housing + loan + poutcome, 
+                                         data=df.train_kmodel_onlysig, family = binomial)
+
+df.test_kmodel_onlysig <- df.test_kmodel_onlysig[df.test_kmodel_onlysig$job!="student",]
+
+summary(result_tentative_trainkmodel_sig1)
+
+# 32. All variables now left are significant. Load them into result_kmodel_sig1
+
+result_kmodel_sig1 <- result_tentative_trainkmodel_sig1
+class(result_kmodel_sig1)
+print(result_kmodel_sig1)
+plot(result_kmodel_sig1)
+
+# 33. Checking Variable Importance of new model
+
+plot(result_kmodel_sig1)
+varImp(result_kmodel_sig1, scale = FALSE)
+
+# 34. Linear Regression of new model
+
+fit_kmodel <- lm(formula <- yact ~ age + balance + duration + campaign + previous +
+                   job + marital + education + housing + loan + poutcome, 
+                 data=df.train_kmodel_onlysig)
+vif(fit_kmodel)
+
+# 35. Repeating steps as in raw model (given by sir)
+
+# automated variable selection - Backward
+backward_kmodel <- step(result_kmodel_sig1, direction = 'backward')
+summary(backward_kmodel)
+
+# training probabilities and roc
+result_kmodel_probs <- df.train_kmodel_onlysig
+nrow(result_kmodel_probs)
+class(result_kmodel_probs)
+
+# 36. Using the NEW model made to make predictions in the column named 'prob'
+result_kmodel_probs$prob = predict(result_kmodel_sig1, type=c("response"))
+q_kmodel <- roc(y ~ prob, data = result_kmodel_probs)
+plot(q_kmodel)
+auc(q_kmodel)
+
+# Area under the curve: Area under the curve: 0.8993
+
+# 37. See how the categorical variables are distributed and are related with target outcome
+CrossTable(df.train_kmodel_onlysig$job, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$marital, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$education, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$default, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$housing, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$loan, df.train_kmodel_onlysig$y)
+CrossTable(df.train_kmodel_onlysig$poutcome, df.train_kmodel_onlysig$y)
+
+# 38. See numerical variable distribution
+hist(df.train_kmodel_onlysig$age)
+hist(df.train_kmodel_onlysig$balance)
+hist(df.train_kmodel_onlysig$duration)
+hist(df.train_kmodel_onlysig$campaign)
+hist(df.train_kmodel_onlysig$previous)
+
+# 39. Confusion Matrix on k-model training set - tocheck the accuracy of the model made by removing all the insignificant variables
+result_kmodel_probs$ypred = ifelse(result_kmodel_probs$prob>=.5,'pred_yes','pred_no')
+table(result_kmodel_probs$ypred,result_kmodel_probs$y)
+
+# 40. Probabilities on test set
+df.test_kmodel_onlysig$prob = predict(result_kmodel_sig1, newdata = df.test_kmodel_onlysig, type=c("response"))
+
+# 41. Confusion Matrix on test set
+df.test_kmodel_onlysig$ypred = ifelse(df.test_kmodel_onlysig$prob>=.5,'pred_yes','pred_no')
+table(df.test_kmodel_onlysig$ypred,df.test_kmodel_onlysig$y)
+
+# 42. KS Plot 
+
+ks_plot(actuals=result_kmodel_probs$y, predictedScores=result_kmodel_probs$ypred)
+
+# 43. The End. 
